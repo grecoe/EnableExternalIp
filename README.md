@@ -10,8 +10,8 @@ Many IT departments will frown the approach taken in these files.
 
 In no way is this a suggestion to subvert your corporate or IT policies in any way. 
 
-However, in a development subscription you may find a need to allow a single external IP to SSH into one of your your Azure Virtual Machines. If this is the case, this is one of many approaches you can take.  
-
+However, in a development subscription you may find a need to allow a single external IP to SSH into one of 
+your your Azure Virtual Machines. If this is the case, this is one of many approaches you can take.  
 ```
 
 There may be a case where your attached network security groups are connected to wider security groups put out by policy on your Azure subscription. In fact, many of the development subscriptions I work on have this exact problem. 
@@ -30,6 +30,7 @@ Allow access to a specified IP address to initiate an SSH session with a securit
 1. You must be able to create a [Service Principal](https://docs.microsoft.com/en-us/powershell/azure/create-azure-service-principal-azureps?view=azps-3.0.0) on your Azure Subscription. 
 2. You must have access to an Azure Subscription in which the Service Principal has access rights.
 3. The subscription must contain at least one virtual machine that has it's own NSG. 
+4. You must pip install azure-common and azure-mgmt
 
 ## Usage
 

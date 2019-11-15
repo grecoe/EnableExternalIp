@@ -10,10 +10,14 @@
 
     REMINDER command line is:
     -sid [subid] -rg [rg_name] -nsg [nsg_name] -ip [ip_addr] -spc [sp_client] -sps [sp_secret] -spt [sp_tenant]  
+
+    pip install azure-cli
+    pip install azure-cli-core
 '''
 
 import argparse
 import sys
+from azure.common.client_factory import get_client_from_cli_profile
 from azure.common.credentials import ServicePrincipalCredentials
 from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.network import NetworkManagementClient
@@ -51,6 +55,12 @@ def getNetworkClient( spCred, subscription_id):
     )
 
 '''
+    Obtain an instance of NetworkManagementClient using logged in profile
+'''
+def getNetworkClient():
+    return get_client_from_cli_profile(NetworkManagementClient)
+
+'''
     Obtain an instance of ResourceManagementClient
 
     Params:
@@ -63,6 +73,57 @@ def getResourceClient( spCred, subscription_id):
         subscription_id
     )
 
+'''
+    Obtain an instance of ResourceManagementClient using logged in profile
+'''
+def getResourceClient():
+    return get_client_from_cli_profile(NetworkManagementClient)
+
+
+'''
+    Get all network interfaces in a resource group, returns list of NetworkInterfacesOperations
+'''
+def getNetworkInterfaces(network_client, resource_group):
+    network_interfaces = []
+    
+    interface_list = network_client.network_interfaces.list(resource_group_name=resource_group)
+
+    for interface in interface_list:
+        network_interfaces.append(interface)
+
+    return network_interfaces
+
+'''
+    Get list of effective ruls in rg and nsg associated with an interface. 
+
+    Takes client and NetworkInterfaceOperations.
+'''
+def getEffectiveRules(network_client, resource_group, network_interface):
+
+    returnRules = []
+    
+    effective_groups = network_client.network_interfaces.list_effective_network_security_groups(resource_group_name=resource_group, network_interface_name=network_interface.name)
+    effective_groups_list = effective_groups.result()
+
+    for effective_group in effective_groups_list.value:
+
+
+        nsgid = effective_group.network_security_group.id.split('/')
+        resource_group_index = nsgid.index('resourceGroups')
+        nsg_index = nsgid.index('networkSecurityGroups')
+
+        nsg_info = {}
+        nsg_info["resource_group"] = nsgid[resource_group_index + 1]
+        nsg_info["network_security_group"] = nsgid[nsg_index + 1]
+        nsg_info["rules"] = []
+
+        for rl in effective_group.effective_security_rules:
+            name = rl.name.split('/')
+            nsg_info["rules"].append(name[-1])    
+        
+        returnRules.append(nsg_info)
+
+    return returnRules
 
 '''
     Search a network security group looking for a rule by a specified name. 

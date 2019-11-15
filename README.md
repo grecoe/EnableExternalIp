@@ -27,10 +27,11 @@ Allow access to a specified IP address to initiate an SSH session with a securit
 
 ## Requirements
 
-1. You must be able to create a [Service Principal](https://docs.microsoft.com/en-us/powershell/azure/create-azure-service-principal-azureps?view=azps-3.0.0) on your Azure Subscription. 
+1. You must be able to create a [Service Principal](https://docs.microsoft.com/en-us/powershell/azure/create-azure-service-principal-azureps?view=azps-3.0.0) on your Azure Subscription. IF you do not want to use the logged in user.  
 2. You must have access to an Azure Subscription in which the Service Principal has access rights.
 3. The subscription must contain at least one virtual machine that has it's own NSG. 
 4. You must pip install azure-common and azure-mgmt
+5. If you want to use logged in user to get objects, you must pip install azure-cli and azure-cli-core
 
 ## Usage
 

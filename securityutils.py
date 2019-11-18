@@ -1,18 +1,16 @@
 '''
-    modifynsg.py 
-    
-    Script that can update or create an NSG rule on an Azure NSG to allow an IP to access the SSH port (22) directly. 
-    
-    Many IT departments will frown on this, and it is not suggested that you in any way subvert your IT department policies. 
-    
-    However, in a dev subscription you may find a need to allow a single IP address external to your network to SSH into one of 
-    your Azure Virtual Machines. If this is the case, this is the approach to take. 
-
-    REMINDER command line is:
-    -sid [subid] -rg [rg_name] -nsg [nsg_name] -ip [ip_addr] -spc [sp_client] -sps [sp_secret] -spt [sp_tenant]  
-
-    pip install azure-cli
-    pip install azure-cli-core
+    OVERVIEW:
+        This script is used to get collect and work with Security Rules associated with Azure Networks. 
+        
+    REQUIREMENTS:
+    - Azure Subscription
+    - Virtual Machine deployment with Network Interface
+    - Access to the resoruce group the virtual machine lives in .
+    - Pip install
+        azure-common
+        azure-mgmt
+        azure-cli
+        azure-cli-core
 '''
 
 import argparse
@@ -77,7 +75,7 @@ def getResourceClient( spCred, subscription_id):
     Obtain an instance of ResourceManagementClient using logged in profile
 '''
 def getResourceClient():
-    return get_client_from_cli_profile(NetworkManagementClient)
+    return get_client_from_cli_profile(ResourceManagementClient)
 
 
 '''
@@ -99,10 +97,13 @@ def getNetworkInterfaces(network_client, resource_group):
     Takes client and NetworkInterfaceOperations.
 '''
 def getEffectiveRules(network_client, resource_group, network_interface):
+    return getEffectiveRulesByName(network_client, resource_group, network_interface.name)
+
+def getEffectiveRulesByName(network_client, resource_group, network_interface_name):
 
     returnRules = []
     
-    effective_groups = network_client.network_interfaces.list_effective_network_security_groups(resource_group_name=resource_group, network_interface_name=network_interface.name)
+    effective_groups = network_client.network_interfaces.list_effective_network_security_groups(resource_group_name=resource_group, network_interface_name=network_interface_name)
     effective_groups_list = effective_groups.result()
 
     for effective_group in effective_groups_list.value:
@@ -126,6 +127,33 @@ def getEffectiveRules(network_client, resource_group, network_interface):
     return returnRules
 
 '''
+    Load rules associated with a security group. 
+
+    Params:
+        network_client : Instance of NetworkManagementClient
+        resource_group : Azure Resource Group in the subscription
+        security_group : Network security group in the Azure Resource Group
+'''
+def loadInboundSecurityRules(network_client, resource_group, security_group):
+    return_rules = []
+
+    result = network_client.security_rules.list(resource_group_name=resource_group, network_security_group_name=security_group)
+    try:
+        foundRule = result.next()
+        while foundRule:
+            if foundRule.direction == 'Inbound':
+                return_rules.append(foundRule)
+            foundRule = result.next()
+
+    except StopIteration as ex:
+        print("Iteration complete")
+    except Exception as ex:
+        print("Unknown exception")
+
+    return return_rules
+
+
+'''
     Search a network security group looking for a rule by a specified name. 
     If found, return the instance of SecurityRule. 
 
@@ -142,7 +170,6 @@ def getSecurityRule(network_client, resource_group, security_group, nsg_rule_nam
         foundRule = result.next()
         while foundRule:
             if( foundRule.name == nsg_rule_name):
-                print("Found the rule")
                 security_rule = foundRule
                 break
             foundRule = result.next()
@@ -155,60 +182,99 @@ def getSecurityRule(network_client, resource_group, security_group, nsg_rule_nam
     return security_rule
 
 '''
-    Check an existing SecurityRule, if it exists, that the priority is 101 and if the requested_ip is 
-    already part of the rule. Returns boolean value determining if the rule needs to be updated for 
-    any reason.  
+    Takes a list of SecurityRule objects and splits them, based on destination port, 
+    into an allow and deny dictionaries of dict[priority] = rule
 
     Params:
-        security_rule : Instance of Security_Rule
-        requested_ip : External IP Address
+        rule_list : List of SecurityRule objects
+        destination_port : Port for access
 '''
-def ruleUpdateNeeded(security_rule, requested_ip):
-    updateRule = True
+def splitRules(rule_list, destination_port):
+    allow = {}
+    deny = {}
 
-    if security_rule and security_rule.priority == 101 : 
-        if security_rule.source_address_prefix == requested_ip or requested_ip in security_rule.source_address_prefixes:
-            print("Rule already contains the IP, nothing more to do....")
-            updateRule = False
+    for rule in rule_list:
+        current_dict = allow
 
-    return updateRule
+        if rule.access != 'Allow':
+            current_dict = deny
+
+        str_port = str(destination_port)
+
+        if (rule.destination_port_range == str_port) or (rule.destination_port_range == '*') or (str_port in rule.destination_port_ranges):
+            current_dict[rule.priority] = rule
+
+    return allow, deny
 
 '''
-    Update or create a security rule in a given network security group. The rule will allow inbound traffic 
-    on port 22 (SSH) through the NSG for the specified IP address. Priority will be set at 101.
+    Takes an instances of SecurityRule and determines if it's IP based. 
+
+    Security rule is IP based IF:
+    - source_address prefix is NOT equal to 'AzureLoadBalancer' or 'VirtualNetwork'
+    - source_address_prefix is not None or source_address_prefixes is not empty
+'''
+def isRuleIpBased(security_rule):
+    return_value = False
+    if security_rule.source_address_prefix == 'AzureLoadBalancer' or security_rule.source_address_prefix == 'VirtualNetwork':
+        return_value = False 
+    elif security_rule.source_address_prefix != None or len(security_rule.source_address_prefixes) > 0:
+        return_value = True
+    return return_value
+
+'''
+    Takes an instances of SecurityRule and determines an IP is in it. 
+'''
+def isIpPresent(security_rule, ip_addr):
+    return_value = False
+    if security_rule.source_address_prefix ==ip_addr or ip_addr in security_rule.source_address_prefixes:
+        return_value = True
+    return return_value
+
+'''
+    Updates an existing security rule to add in new IP address.
 
     Params:
         network_client : Instance of NetworkManagementClient
         existing_rule : Instance of Security_Rule or None
         resource_group : Azure Resource Group in the subscription
         nsg_name : Network security group in the Azure Resource Group
-        nsg_rule_name :  Network security rule name to search for
         requested_ip : External IP Address
 '''
-def updateSecurityRule(network_client, existing_rule, resource_group, nsg_name, nsg_rule_name, requested_ip):
+def updateSecurityRule(network_client, existing_rule, resource_group, nsg_name, requested_ip):
+    existing_rule.source_address_prefixes.append(requested_ip)
+    async_security_rule = network_client.security_rules.create_or_update(resource_group, nsg_name, existing_rule.name, existing_rule)
+
+    updated_security_rule = async_security_rule.result()
+    print(updated_security_rule)    
+
+
+'''
+    Create a security rule in a given network security group. The rule will allow inbound traffic 
+    on the selected port through the NSG for the specified IP address. 
+
+    Params:
+        network_client : Instance of NetworkManagementClient
+        resource_group : Azure Resource Group in the subscription
+        nsg_name : Network security group in the Azure Resource Group
+        nsg_rule_name :  Network security rule name to search for
+        priority: Priority between 100 - 4001
+        port: Port  for access
+        requested_ip : External IP Address
+'''
+def createSecurityRule(network_client, resource_group, nsg_name, nsg_rule_name, priority, port, requested_ip):
 
     print("Create or update rule ", nsg_rule_name)
     ruleConfiguration = {
             'access': SecurityRuleAccess.allow,
             'description':'New Test security rule',
             'destination_address_prefix':'*',
-            'destination_port_range':'22',
+            'destination_port_range': str(port),
             'direction': SecurityRuleDirection.inbound,
-            'priority': 101,
+            'priority': int(priority),
             'protocol': SecurityRuleProtocol.tcp,
-            'source_port_range':'*',        
+            'source_port_range':'*', 
+            'source_address_prefix' : requested_ip       
     }
-
-    # If rule exists, just extend the IP list, otherwise we are creating so just add the one. 
-    if existing_rule:
-        source_addresses = [requested_ip]
-        if existing_rule.source_address_prefix and len(existing_rule.source_address_prefix) > 0:
-            source_addresses.append(existing_rule.source_address_prefix)
-        else:
-            source_addresses.extend(existing_rule.source_address_prefixes)
-        ruleConfiguration['source_address_prefixes'] = source_addresses
-    else:
-        ruleConfiguration['source_address_prefix'] = requested_ip
 
     async_security_rule = network_client.security_rules.create_or_update(
         resource_group,
@@ -220,40 +286,3 @@ def updateSecurityRule(network_client, existing_rule, resource_group, nsg_name, 
     security_rule = async_security_rule.result()
     print(security_rule)    
 
-
-
-def main():
-    parser = argparse.ArgumentParser(description='Modify NSG inputs')
-    parser.add_argument("-sid", required=True, type=str, help="Subscription ID")
-    parser.add_argument("-rg", required=True, type=str, help="Resource Group Name")
-    parser.add_argument("-nsg", required=True, type=str, help="Network Security Group Name")
-    parser.add_argument("-ip", required=True, type=str, help="IP Address to clear")
-    parser.add_argument("-spc", required=True, type=str, help="Service Principal ID")
-    parser.add_argument("-sps", required=True, type=str, help="Service Principal Secret")
-    parser.add_argument("-spt", required=True, type=str, help="Service Principal tenent")
-
-    programArgs = parser.parse_args(sys.argv[1:])
-
-    nsg_rule_name = 'build_ssh'
-
-    # Create the stuff we need
-    spCreds = getServicePrincipal(programArgs.spc, programArgs.sps, programArgs.spt)
-    nwClient = getNetworkClient( spCreds, programArgs.sid)
-    rsClient = getResourceClient( spCreds, programArgs.sid)
-
-    # Not sure this is neccesary....
-    rsClient.providers.register('Microsoft.Network')
-
-    # Try and obtain the rule
-    secRule = getSecurityRule(nwClient, programArgs.rg, programArgs.nsg, nsg_rule_name)
-
-    # Determine if a create/update is required
-    update = ruleUpdateNeeded(secRule, programArgs.ip)
-
-    # Update/create as needed
-    if update:
-        updateSecurityRule(nwClient, secRule, programArgs.rg, programArgs.nsg, nsg_rule_name, programArgs.ip)
-
-
-if __name__ == '__main__':
-    main()

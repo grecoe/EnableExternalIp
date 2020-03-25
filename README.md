@@ -13,13 +13,14 @@ Point-to-site VPN solutions are a completely acceptable and secure solution and 
 
 1. An Azure Subscripiton that contains a resource group containing a Network Interface (attached to the Virtural machine you are trying to access). 
 2. Access to that account from bash, cmd, or Powershell
-   * Log in on whatever shell you are using using az login. 
-   * Use a service principal, but you must be able to create a [Service Principal](https://docs.microsoft.com/en-us/powershell/azure/create-azure-service-principal-azureps?view=azps-3.0.0) on your Azure Subscription. 
+   * Option1: Log in on whatever shell you are using using az login. 
+   * Option 2 (not utilized in forceip.py currently): Use a service principal, but you must be able to create a [Service Principal](https://docs.microsoft.com/en-us/powershell/azure/create-azure-service-principal-azureps?view=azps-3.0.0) on your Azure Subscription. 
 4. In your shell you must pip install the following packages. You may want to set up a conda environment so you can clean it up easily. 
    * azure-common
    * azure-mgmt
    * azure-cli
    * azure-cli-core
+5. Code does not select your subscription. You will need to use az account set -s [your-sub-id] to point to the sub you are trying to work with. 
 
 ## Usage
 
